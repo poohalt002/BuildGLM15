@@ -1,0 +1,281 @@
+name: BuildGLM
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - run: |
+          set -ex
+          mkdir -p Payload/GLM.app
+          cat > app.swift <<'SWIFT'
+          import UIKit
+          import WebKit
+          import AVFoundation
+
+          class VC: UIViewController, WKScriptMessageHandler, WKUIDelegate, WKNavigationDelegate {
+              var wv: WKWebView!
+              var lastColor = "255,255,255"
+              var stableCount = 0
+              var sb = false
+              var loadAttempts = 0
+              var blankCheckTimer: Timer?
+              var spinner: UIActivityIndicatorView!
+
+              override var preferredStatusBarStyle: UIStatusBarStyle {
+                  return sb ? .lightContent : .darkContent
+              }
+
+              override func viewDidLoad() {
+                  super.viewDidLoad()
+                  view.backgroundColor = UIColor.white
+                  sb = false
+                  AVCaptureDevice.requestAccess(for: .audio) { _ in }
+
+                  spinner = UIActivityIndicatorView(style: .large)
+                  spinner.translatesAutoresizingMaskIntoConstraints = false
+                  spinner.hidesWhenStopped = true
+                  spinner.color = UIColor.gray
+                  view.addSubview(spinner)
+                  NSLayoutConstraint.activate([
+                      spinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                      spinner.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+                  ])
+                  spinner.startAnimating()
+
+                  let c = WKWebViewConfiguration()
+                  c.userContentController.add(self, name: "themeHandler")
+                  c.userContentController.add(self, name: "errorHandler")
+                  c.allowsInlineMediaPlayback = true
+                  c.mediaTypesRequiringUserActionForPlayback = []
+                  c.preferences.javaScriptEnabled = true
+                  if #available(iOS 14.0, *) {
+                      c.defaultWebpagePreferences.allowsContentJavaScript = true
+                  }
+                  if #available(iOS 13.0, *) {
+                      let prefs = WKWebpagePreferences()
+                      prefs.preferredContentMode = .mobile
+                      c.defaultWebpagePreferences = prefs
+                  }
+
+                  let polyfillJS = """
+                  (function(){
+                      window.addEventListener('error', function(e) {
+                          if(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.errorHandler) {
+                              window.webkit.messageHandlers.errorHandler.postMessage('ERR:'+e.message+'@'+e.filename+':'+e.lineno);
+                          }
+                      });
+                      window.addEventListener('unhandledrejection', function(e) {
+                          if(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.errorHandler) {
+                              window.webkit.messageHandlers.errorHandler.postMessage('REJ:'+e.reason);
+                          }
+                      });
+                      if(!Promise.allSettled) Promise.allSettled=function(p){return Promise.all(p.map(function(x){return Promise.resolve(x).then(function(v){return{status:'fulfilled',value:v}},function(e){return{status:'rejected',reason:e}})}))};
+                      if(!Promise.any) Promise.any=function(p){return new Promise(function(r,j){var e=[],c=p.length;if(!c)j(new AggregateError([]));p.forEach(function(x,i){Promise.resolve(x).then(r,function(err){e[i]=err;if(!--c)j(new AggregateError(e))})})})};
+                      if(!Array.prototype.at) Array.prototype.at=function(n){n=Math.trunc(n)||0;if(n<<0)n+=this.length;return n<<0||n>=this.length?undefined:this[n]};
+                      if(!String.prototype.replaceAll) String.prototype.replaceAll=function(s,r){return this.split(s).join(r)};
+                      if(!Object.fromEntries) Object.fromEntries=function(e){var o={};for(var i=0;i<e.length;i++)o[e[i][0]]=e[i][1];return o};
+                      if(!Array.prototype.flat) Array.prototype.flat=function(d){d=d===undefined?1:Math.floor(d);var f=function(a,dep){if(dep<<1)return a.slice();var r=[];for(var i=0;i<a.length;i++)if(Array.isArray(a[i]))r=r.concat(f(a[i],dep-1));else r.push(a[i]);return r};return f(this,d)};
+                      if(!window.requestIdleCallback) {window.requestIdleCallback=function(cb){return setTimeout(function(){cb({didTimeout:false,timeRemaining:function(){return 50}})},1)};window.cancelIdleCallback=function(id){clearTimeout(id)}}
+                      if(!navigator.hardwareConcurrency) navigator.hardwareConcurrency=2;
+                      if(!navigator.deviceMemory) navigator.deviceMemory=2;
+                      if(!window.structuredClone) window.structuredClone=function(v){return JSON.parse(JSON.stringify(v))};
+                      if(AbortSignal && !AbortSignal.timeout) AbortSignal.timeout=function(ms){var c=new AbortController();setTimeout(function(){c.abort()},ms);return c.signal};
+                      if(!navigator.userAgentData) navigator.userAgentData={brands:[{brand:'Safari',version:'15'},{brand:'Apple WebKit',version:'605'}],mobile:true,platform:'iOS',getHighEntropyValues:function(){return Promise.resolve({})}};
+                      if(!window.ResizeObserver) {
+                          window.ResizeObserver=function(cb){this.cb=cb;this.els=[];this.t=null};
+                          window.ResizeObserver.prototype.observe=function(el){var self=this;this.els.push(el);if(!this.t){var last={};this.t=setInterval(function(){var entries=[];for(var i=0;i<<self.els.length;i++){var e=self.els[i];var r=e.getBoundingClientRect();var k=e;if(!last[k]||last[k].w!==r.width||last[k].h!==r.height){last[k]={w:r.width,h:r.height};entries.push({target:e,contentRect:r,borderBoxSize:[{inlineSize:r.width,blockSize:r.height}],contentBoxSize:[{inlineSize:r.width,blockSize:r.height}]})}}if(entries.length)self.cb(entries,self)},200)}};
+                          window.ResizeObserver.prototype.unobserve=function(el){var i=this.els.indexOf(el);if(i>-1)this.els.splice(i,1)};
+                          window.ResizeObserver.prototype.disconnect=function(){this.els=[];clearInterval(this.t);this.t=null};
+                      }
+                      var origMM=window.matchMedia;
+                      window.matchMedia=function(q){var m=origMM(q);if(!m.addEventListener){m.addEventListener=function(t,l){m.addListener(l)};m.removeEventListener=function(t,l){m.removeListener(l)}}return m};
+                      var origGetContext=HTMLCanvasElement.prototype.getContext;
+                      HTMLCanvasElement.prototype.getContext=function(type,attrs){if(type==='webgl2'){return origGetContext.call(this,'webgl',attrs)||origGetContext.call(this,'experimental-webgl',attrs)||null}return origGetContext.call(this,type,attrs)};
+                      window.addEventListener('load',function(){setTimeout(function(){document.body.style.visibility='visible';document.body.style.opacity='1';document.documentElement.style.visibility='visible';document.documentElement.style.opacity='1';},500);});
+                  })()
+                  """
+
+                  let themeJS = """
+                  (function(){
+                      function getTopColor(){
+                          var selectors=['header','nav','[class*=header]','.app-header','.navbar','[class*=navbar]','[class*=top-bar]','[class*=appbar]','[class*=toolbar]'];
+                          for(var i=0;i<selectors.length;i++){
+                              var el=document.querySelector(selectors[i]);
+                              if(el){
+                                  var rect=el.getBoundingClientRect();
+                                  if(rect.top<=5&&rect.height>20){
+                                      var c=getComputedStyle(el).backgroundColor;
+                                      var m=c.match(/(\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)/);
+                                      if(m&&c!=='rgba(0, 0, 0, 0)'&&c!=='transparent')return m[1]+','+m[2]+','+m[3];
+                                  }
+                              }
+                          }
+                          var els=[document.body,document.documentElement];
+                          for(var j=0;j<<els.length;j++){
+                              if(els[j]){
+                                  var c2=getComputedStyle(els[j]).backgroundColor;
+                                  var m2=c2.match(/(\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)/);
+                                  if(m2&&c2!=='rgba(0, 0, 0, 0)'&&c2!=='transparent')return m2[1]+','+m2[2]+','+m2[3];
+                              }
+                          }
+                          return '255,255,255';
+                      }
+                      function send(){var c=getTopColor();if(window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.themeHandler)window.webkit.messageHandlers.themeHandler.postMessage(c)}
+                      send();
+                      setInterval(send,400);
+                      if(window.MutationObserver){var o=new MutationObserver(function(){send()});o.observe(document.documentElement,{attributes:true,childList:true,subtree:true})}
+                  })()
+                  """
+
+                  let blankFixJS = """
+                  (function(){
+                      setTimeout(function(){
+                          var body=document.body, html=document.documentElement;
+                          if(body){body.style.visibility='visible';body.style.opacity='1';body.style.display='block';}
+                          if(html){html.style.visibility='visible';html.style.opacity='1';}
+                          var all=document.querySelectorAll('*');
+                          for(var i=0;i<<all.length;i++){
+                              var st=getComputedStyle(all[i]);
+                              if(st.display==='none'&&all[i].tagName!=='SCRIPT'&&all[i].tagName!=='STYLE'&&all[i].tagName!=='META'){
+                                  all[i].style.display='block';
+                              }
+                          }
+                      },1500);
+                  })()
+                  """
+
+                  c.userContentController.addUserScript(WKUserScript(source: polyfillJS, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+                  c.userContentController.addUserScript(WKUserScript(source: blankFixJS, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
+                  c.userContentController.addUserScript(WKUserScript(source: themeJS, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
+
+                  wv = WKWebView(frame: .zero, configuration: c)
+                  wv.translatesAutoresizingMaskIntoConstraints = false
+                  wv.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
+                  if #available(iOS 14.5, *) {
+                      wv.applicationNameForUserAgent = "Safari/604.1"
+                  }
+                  wv.uiDelegate = self
+                  wv.navigationDelegate = self
+                  wv.isOpaque = false
+                  wv.backgroundColor = UIColor.clear
+                  wv.scrollView.bounces = true
+                  wv.scrollView.isScrollEnabled = true
+                  wv.allowsBackForwardNavigationGestures = true
+                  wv.allowsLinkPreview = false
+                  view.addSubview(wv)
+                  NSLayoutConstraint.activate([
+                      wv.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+                      wv.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                      wv.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                      wv.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+                  ])
+                  loadURL()
+              }
+
+              func loadURL() {
+                  let url = URL(string: "https://chat.z.ai/")!
+                  var request = URLRequest(url: url)
+                  request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1", forHTTPHeaderField: "User-Agent")
+                  wv.load(request)
+              }
+
+              func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+                  spinner.stopAnimating()
+                  blankCheckTimer?.invalidate()
+                  blankCheckTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: false) { _ in
+                      webView.evaluateJavaScript("document.body.innerHTML.length") { result, error in
+                          if let len = result as? Int, len < 200 {
+                              self.loadAttempts += 1
+                              if self.loadAttempts < 3 {
+                                  self.spinner.startAnimating()
+                                  webView.reload()
+                              }
+                          }
+                      }
+                  }
+              }
+
+              func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+                  DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                      self.spinner.startAnimating()
+                      self.loadURL()
+                  }
+              }
+
+              func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+                  DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                      self.spinner.startAnimating()
+                      webView.reload()
+                  }
+              }
+
+              func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+                  print("Process terminated, reloading...")
+                  spinner.startAnimating()
+                  webView.reload()
+              }
+
+              func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) { completionHandler() }
+              func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) { completionHandler(true) }
+              func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) { completionHandler(defaultText) }
+
+              func userContentController(_ u: WKUserContentController, didReceive m: WKScriptMessage) {
+                  if m.name == "themeHandler", let rgb = m.body as? String {
+                      let p = rgb.split(separator: ",").compactMap { Int($0) }
+                      guard p.count == 3 else { return }
+                      let R = CGFloat(p[0]) / 255.0
+                      let G = CGFloat(p[1]) / 255.0
+                      let B = CGFloat(p[2]) / 255.0
+                      view.backgroundColor = UIColor(red: R, green: G, blue: B, alpha: 1.0)
+                      let luminance = (0.299*CGFloat(p[0]) + 0.587*CGFloat(p[1]) + 0.114*CGFloat(p[2])) / 255.0
+                      sb = luminance < 0.45 ? true : (luminance > 0.55 ? false : sb)
+                      setNeedsStatusBarAppearanceUpdate()
+                  } else if m.name == "errorHandler", let msg = m.body as? String {
+                      print("JS: " + msg)
+                  }
+              }
+          }
+
+          class AD: UIResponder, UIApplicationDelegate {
+              var w: UIWindow?
+              func application(_ a: UIApplication, didFinishLaunchingWithOptions l: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+                  w = UIWindow(frame: UIScreen.main.bounds)
+                  w?.rootViewController = VC()
+                  w?.makeKeyAndVisible()
+                  return true
+              }
+          }
+
+          UIApplicationMain(CommandLine.argc, CommandLine.unsafeArgv, nil, NSStringFromClass(AD.self))
+          SWIFT
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          xcrun -sdk iphoneos swiftc -target arm64-apple-ios15.0 -framework UIKit -framework WebKit -framework AVFoundation -o Payload/GLM.app/GLM app.swift
+          chmod +x Payload/GLM.app/GLM
+          cat > Payload/GLM.app/Info.plist <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+          <key>CFBundleExecutable</key><string>GLM</string>
+          <key>CFBundleIdentifier</key><string>com.z.glm</string>
+          <key>CFBundleName</key><string>GLM</string>
+          <key>CFBundlePackageType</key><string>APPL</string>
+          <key>CFBundleShortVersionString</key><string>1.0</string>
+          <key>CFBundleVersion</key><string>1</string>
+          <key>LSRequiresIPhoneOS</key><true/>
+          <key>MinimumOSVersion</key><string>15.0</string>
+          <key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>
+          <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
+          <key>UIViewControllerBasedStatusBarAppearance</key><true/>
+          <key>CFBundleIcons</key><dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>AppIcon60x60</string></array><key>CFBundleIconName</key><string>AppIcon</string></dict></dict>
+          <key>NSMicrophoneUsageDescription</key><string>GLM needs microphone for voice input.</string>
+          <key>NSCameraUsageDescription</key><string>GLM needs camera for image uploads.</string>
+          <key>NSLocationWhenInUseUsageDescription</key><string>GLM needs location for AI features.</string>
+          <key>NSPhotoLibraryUsageDescription</key><string>GLM needs photo library for image uploads.</string>
+          </dict></plist>
+          PLIST
+          printf 'APPL????' > Payload/GLM.app/PkgInfo
+          zip -r GLM.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GLM-IPA
+          path: GLM.ipa
