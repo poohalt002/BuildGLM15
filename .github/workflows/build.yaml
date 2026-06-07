@@ -47,7 +47,6 @@ jobs:
                   c.userContentController.add(self, name: "errorHandler")
                   c.allowsInlineMediaPlayback = true
                   c.mediaTypesRequiringUserActionForPlayback = []
-                  c.preferences.javaScriptEnabled = true
                   if #available(iOS 14.0, *) {
                       c.defaultWebpagePreferences.allowsContentJavaScript = true
                   }
@@ -151,9 +150,6 @@ jobs:
                   wv = WKWebView(frame: .zero, configuration: c)
                   wv.translatesAutoresizingMaskIntoConstraints = false
                   wv.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
-                  if #available(iOS 14.5, *) {
-                      wv.applicationNameForUserAgent = "Safari/604.1"
-                  }
                   wv.uiDelegate = self
                   wv.navigationDelegate = self
                   wv.isOpaque = false
