@@ -1,4 +1,4 @@
-name: BuildGLM
+name: BuildArenaAI
 on: workflow_dispatch
 jobs:
   build:
@@ -6,7 +6,7 @@ jobs:
     steps:
       - run: |
           set -ex
-          mkdir -p Payload/GLM.app
+          mkdir -p Payload/ArenaAI.app
           cat > app.swift <<'SWIFT'
           import UIKit
           import WebKit
@@ -17,8 +17,6 @@ jobs:
               var lastColor = "255,255,255"
               var stableCount = 0
               var sb = false
-              var loadAttempts = 0
-              var blankCheckTimer: Timer?
               var spinner: UIActivityIndicatorView!
 
               override var preferredStatusBarStyle: UIStatusBarStyle {
@@ -88,9 +86,63 @@ jobs:
                       }
                       var origMM=window.matchMedia;
                       window.matchMedia=function(q){var m=origMM(q);if(!m.addEventListener){m.addEventListener=function(t,l){m.addListener(l)};m.removeEventListener=function(t,l){m.removeListener(l)}}return m};
-                      var origGetContext=HTMLCanvasElement.prototype.getContext;
-                      HTMLCanvasElement.prototype.getContext=function(type,attrs){if(type==='webgl2'){return origGetContext.call(this,'webgl',attrs)||origGetContext.call(this,'experimental-webgl',attrs)||null}return origGetContext.call(this,type,attrs)};
-                      window.addEventListener('load',function(){setTimeout(function(){document.body.style.visibility='visible';document.body.style.opacity='1';document.documentElement.style.visibility='visible';document.documentElement.style.opacity='1';},500);});
+                  })()
+                  """
+
+                  let pointerFixJS = """
+                  (function(){
+                      if(!window.PointerEvent) {
+                          window.PointerEvent=function(type,init){init=init||{};var e=document.createEvent('MouseEvent');e.initMouseEvent(type,init.bubbles||true,init.cancelable||true,window,0,init.clientX||0,init.clientY||0,init.clientX||0,init.clientY||0,false,false,false,false,0,null);e.pointerId=init.pointerId||1;e.pointerType=init.pointerType||'touch';e.isPrimary=init.isPrimary||true;e.pressure=init.pressure||0.5;return e};
+                          var mapTouch=function(type,touch,target){
+                              var e=new PointerEvent(type,{bubbles:true,cancelable:true,clientX:touch.clientX,clientY:touch.clientY,pointerId:touch.identifier+1,pointerType:'touch',isPrimary:true,pressure:0.5});
+                              target.dispatchEvent(e);
+                          };
+                          document.addEventListener('touchstart',function(e){for(var i=0;i<e.changedTouches.length;i++)mapTouch('pointerdown',e.changedTouches[i],e.changedTouches[i].target)},true);
+                          document.addEventListener('touchmove',function(e){for(var i=0;i<e.changedTouches.length;i++)mapTouch('pointermove',e.changedTouches[i],e.changedTouches[i].target)},true);
+                          document.addEventListener('touchend',function(e){for(var i=0;i<e.changedTouches.length;i++){mapTouch('pointerup',e.changedTouches[i],e.changedTouches[i].target);mapTouch('pointerleave',e.changedTouches[i],e.changedTouches[i].target)}},true);
+                      }
+                      var lastTouch={x:0,y:0,time:0};
+                      document.addEventListener('touchstart',function(e){lastTouch.x=e.touches[0].clientX;lastTouch.y=e.touches[0].clientY;lastTouch.time=Date.now()},true);
+                      document.addEventListener('touchend',function(e){
+                          var t=e.changedTouches[0];
+                          var dx=t.clientX-lastTouch.x,dy=t.clientY-lastTouch.y,dt=Date.now()-lastTouch.time;
+                          if(Math.abs(dx)<10&&Math.abs(dy)<10&&dt<<300){
+                              var el=document.elementFromPoint(t.clientX,t.clientY);
+                              while(el&&el!==document.body){
+                                  if(el.tagName==='BUTTON'||el.tagName==='A'||el.onclick||el.getAttribute('role')==='button'||el.classList.contains('btn')||el.classList.contains('button')||window.getComputedStyle(el).cursor==='pointer'||el.tagName==='INPUT'||el.tagName==='SELECT'||el.tagName==='TEXTAREA'){
+                                      var ev=document.createEvent('MouseEvent');
+                                      ev.initMouseEvent('click',true,true,window,1,t.screenX,t.screenY,t.clientX,t.clientY,false,false,false,false,0,null);
+                                      ev.synthetic=true;
+                                      el.dispatchEvent(ev);
+                                      if(el.tagName==='A'&&el.href){var href=el.getAttribute('href');if(href&&href!=='#'&&href.indexOf('javascript:')!==0){window.location.href=href;}}
+                                      return;
+                                  }
+                                  el=el.parentElement;
+                              }
+                          }
+                      },true);
+                      var s=document.createElement('style');
+                      s.textContent='*{-webkit-tap-highlight-color:transparent}button,a,[role=\"button\"],.btn,.button,[onclick],input[type=\"submit\"],input[type=\"button\"],label{cursor:pointer!important;touch-action:manipulation!important;-webkit-user-select:none!important;user-select:none!important}';
+                      if(document.head)document.head.appendChild(s);
+                      var origAddEventListener=HTMLElement.prototype.addEventListener;
+                      HTMLElement.prototype.addEventListener=function(type,listener,options){
+                          var self=this;
+                          if(type==='click'||type==='pointerdown'||type==='pointerup'||type==='touchend'){
+                              var wrapped=function(e){
+                                  if(type==='click'&&e.synthetic)return listener.call(self,e);
+                                  var t=e;
+                                  if(e.type==='touchend'&&type==='click'){
+                                      var ev=document.createEvent('MouseEvent');
+                                      ev.initMouseEvent('click',true,true,window,1,0,0,0,0,false,false,false,false,0,null);
+                                      ev.synthetic=true;
+                                      t=ev;
+                                  }
+                                  return listener.call(self,t);
+                              };
+                              return origAddEventListener.call(this,type,wrapped,options);
+                          }
+                          return origAddEventListener.call(this,type,listener,options);
+                      };
                   })()
                   """
 
@@ -126,25 +178,8 @@ jobs:
                   })()
                   """
 
-                  let blankFixJS = """
-                  (function(){
-                      setTimeout(function(){
-                          var body=document.body, html=document.documentElement;
-                          if(body){body.style.visibility='visible';body.style.opacity='1';body.style.display='block';}
-                          if(html){html.style.visibility='visible';html.style.opacity='1';}
-                          var all=document.querySelectorAll('*');
-                          for(var i=0;i<<all.length;i++){
-                              var st=getComputedStyle(all[i]);
-                              if(st.display==='none'&&all[i].tagName!=='SCRIPT'&&all[i].tagName!=='STYLE'&&all[i].tagName!=='META'){
-                                  all[i].style.display='block';
-                              }
-                          }
-                      },1500);
-                  })()
-                  """
-
                   c.userContentController.addUserScript(WKUserScript(source: polyfillJS, injectionTime: .atDocumentStart, forMainFrameOnly: false))
-                  c.userContentController.addUserScript(WKUserScript(source: blankFixJS, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
+                  c.userContentController.addUserScript(WKUserScript(source: pointerFixJS, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
                   c.userContentController.addUserScript(WKUserScript(source: themeJS, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
 
                   wv = WKWebView(frame: .zero, configuration: c)
@@ -169,7 +204,7 @@ jobs:
               }
 
               func loadURL() {
-                  let url = URL(string: "https://chat.z.ai/")!
+                  let url = URL(string: "https://arena.ai/")!
                   var request = URLRequest(url: url)
                   request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1", forHTTPHeaderField: "User-Agent")
                   wv.load(request)
@@ -177,18 +212,6 @@ jobs:
 
               func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
                   spinner.stopAnimating()
-                  blankCheckTimer?.invalidate()
-                  blankCheckTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: false) { _ in
-                      webView.evaluateJavaScript("document.body.innerHTML.length") { result, error in
-                          if let len = result as? Int, len < 200 {
-                              self.loadAttempts += 1
-                              if self.loadAttempts < 3 {
-                                  self.spinner.startAnimating()
-                                  webView.reload()
-                              }
-                          }
-                      }
-                  }
               }
 
               func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
@@ -245,15 +268,15 @@ jobs:
           UIApplicationMain(CommandLine.argc, CommandLine.unsafeArgv, nil, NSStringFromClass(AD.self))
           SWIFT
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          xcrun -sdk iphoneos swiftc -target arm64-apple-ios15.0 -framework UIKit -framework WebKit -framework AVFoundation -o Payload/GLM.app/GLM app.swift
-          chmod +x Payload/GLM.app/GLM
-          cat > Payload/GLM.app/Info.plist <<'PLIST'
+          xcrun -sdk iphoneos swiftc -target arm64-apple-ios15.0 -framework UIKit -framework WebKit -framework AVFoundation -o Payload/ArenaAI.app/ArenaAI app.swift
+          chmod +x Payload/ArenaAI.app/ArenaAI
+          cat > Payload/ArenaAI.app/Info.plist <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0"><dict>
-          <key>CFBundleExecutable</key><string>GLM</string>
-          <key>CFBundleIdentifier</key><string>com.z.glm</string>
-          <key>CFBundleName</key><string>GLM</string>
+          <key>CFBundleExecutable</key><string>ArenaAI</string>
+          <key>CFBundleIdentifier</key><string>com.arena.ai</string>
+          <key>CFBundleName</key><string>Arena AI</string>
           <key>CFBundlePackageType</key><string>APPL</string>
           <key>CFBundleShortVersionString</key><string>1.0</string>
           <key>CFBundleVersion</key><string>1</string>
@@ -263,15 +286,15 @@ jobs:
           <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
           <key>UIViewControllerBasedStatusBarAppearance</key><true/>
           <key>CFBundleIcons</key><dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>AppIcon60x60</string></array><key>CFBundleIconName</key><string>AppIcon</string></dict></dict>
-          <key>NSMicrophoneUsageDescription</key><string>GLM needs microphone for voice input.</string>
-          <key>NSCameraUsageDescription</key><string>GLM needs camera for image uploads.</string>
-          <key>NSLocationWhenInUseUsageDescription</key><string>GLM needs location for AI features.</string>
-          <key>NSPhotoLibraryUsageDescription</key><string>GLM needs photo library for image uploads.</string>
+          <key>NSMicrophoneUsageDescription</key><string>Arena AI needs microphone for voice input.</string>
+          <key>NSCameraUsageDescription</key><string>Arena AI needs camera for image uploads.</string>
+          <key>NSLocationWhenInUseUsageDescription</key><string>Arena AI needs location for AI features.</string>
+          <key>NSPhotoLibraryUsageDescription</key><string>Arena AI needs photo library for image uploads.</string>
           </dict></plist>
           PLIST
-          printf 'APPL????' > Payload/GLM.app/PkgInfo
-          zip -r GLM.ipa Payload
+          printf 'APPL????' > Payload/ArenaAI.app/PkgInfo
+          zip -r ArenaAI.ipa Payload
       - uses: actions/upload-artifact@v4
         with:
-          name: GLM-IPA
-          path: GLM.ipa
+          name: ArenaAI-IPA
+          path: ArenaAI.ipa
